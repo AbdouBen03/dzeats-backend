@@ -1,0 +1,35 @@
+import express from "express";
+import {
+  createUser,
+  createRestaurantForOwner,
+  getAllUsers,
+  updateUser,
+  deleteUser,
+  updateRestaurant,
+  deleteRestaurant,
+  getAllRestaurants,
+  getAllOrders
+} from "../controllers/adminController.js";
+import { verifyToken } from "../middleware/authMiddleware.js";
+import { checkRole } from "../middleware/roleMiddleware.js";
+
+const router = express.Router();
+
+router.use(verifyToken, checkRole(["admin"]));
+
+// users
+router.get("/users", getAllUsers);
+router.post("/users", createUser);
+router.put("/users/:id", updateUser);
+router.delete("/users/:id", deleteUser);
+
+// restaurants
+router.get("/restaurants", getAllRestaurants);
+router.post("/restaurants", createRestaurantForOwner);
+router.put("/restaurants/:id", updateRestaurant);
+router.delete("/restaurants/:id", deleteRestaurant);
+
+// orders
+router.get("/orders", getAllOrders);
+
+export default router;
