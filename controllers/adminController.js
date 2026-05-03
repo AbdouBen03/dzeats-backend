@@ -4,6 +4,7 @@ import bcrypt from "bcrypt";
 // Create any user (driver or restaurant_owner)
 export const createUser = async (req, res) => {
   const { name, phone, password, role } = req.body;
+ console.log("Admin creating user, req.user:", req.user);
 
   try {
     if (!["driver", "restaurant_owner", "admin"].includes(role)) {
