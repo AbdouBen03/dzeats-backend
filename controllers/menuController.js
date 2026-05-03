@@ -12,7 +12,9 @@ export const getMenu = async (req, res) => {
       restaurant_id: item.restaurant_id,
       name: item.name,
       price: Number(item.price),
-      is_hidden: item.is_hidden
+      is_hidden: item.is_hidden,
+      image_url: item.image_url,
+      category: item.category,
     }));
     res.json(formatted);
   } catch (err) {
@@ -20,7 +22,6 @@ export const getMenu = async (req, res) => {
   }
 };
 
-// Owner: get ALL their menu items including hidden ones
 export const getOwnerMenu = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -31,7 +32,7 @@ export const getOwnerMenu = async (req, res) => {
     );
 
     if (restaurant.rows.length === 0) {
-      return res.status(404).json({ error: "No restaurant found for this owner" });
+      return res.status(404).json({ error: "No restaurant found" });
     }
 
     const restaurantId = restaurant.rows[0].id;
@@ -46,7 +47,9 @@ export const getOwnerMenu = async (req, res) => {
       restaurant_id: item.restaurant_id,
       name: item.name,
       price: Number(item.price),
-      is_hidden: item.is_hidden
+      is_hidden: item.is_hidden,
+      image_url: item.image_url,
+      category: item.category,
     }));
 
     res.json({ restaurant: restaurant.rows[0], menu: formatted });
@@ -68,13 +71,48 @@ export const addMenuItem = async (req, res) => {
       return res.status(403).json({ error: "Not your restaurant" });
     }
 
-    const { name, price } = req.body;
+    const { name, price, category } = req.body;
     const restaurantId = restaurant.rows[0].id;
+    const imageUrl = req.file ? req.file.path : null;
 
     const result = await pool.query(
-      "INSERT INTO menu_items (restaurant_id, name, price) VALUES ($1,$2,$3) RETURNING *",
-      [restaurantId, name, Number(price)]
+      "INSERT INTO menu_items (restaurant_id, name, price, image_url, category) VALUES ($1,$2,$3,$4,$5) RETURNING *",
+      [restaurantId, name, Number(price), imageUrl, category || "Main"]
     );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+export const editMenuItem = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+    const { name, price, category } = req.body;
+    const imageUrl = req.file ? req.file.path : null;
+
+    const check = await pool.query(
+      `SELECT mi.* FROM menu_items mi
+       JOIN restaurants r ON mi.restaurant_id = r.id
+       WHERE mi.id = $1 AND r.owner_id = $2`,
+      [id, userId]
+    );
+
+    if (check.rows.length === 0) {
+      return res.status(403).json({ error: "Not authorized" });
+    }
+
+    const result = imageUrl
+      ? await pool.query(
+          "UPDATE menu_items SET name = $1, price = $2, image_url = $3, category = $4 WHERE id = $5 RETURNING *",
+          [name, Number(price), imageUrl, category || "Main", id]
+        )
+      : await pool.query(
+          "UPDATE menu_items SET name = $1, price = $2, category = $3 WHERE id = $4 RETURNING *",
+          [name, Number(price), category || "Main", id]
+        );
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -87,7 +125,6 @@ export const deleteMenuItem = async (req, res) => {
     const userId = req.user.id;
     const { id } = req.params;
 
-    // make sure item belongs to owner's restaurant
     const check = await pool.query(
       `SELECT mi.* FROM menu_items mi
        JOIN restaurants r ON mi.restaurant_id = r.id
@@ -130,33 +167,6 @@ export const toggleHideMenuItem = async (req, res) => {
     );
 
     res.json({ message: "Item updated", item: result.rows[0] });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-export const editMenuItem = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { id } = req.params;
-    const { name, price } = req.body;
-
-    const check = await pool.query(
-      `SELECT mi.* FROM menu_items mi
-       JOIN restaurants r ON mi.restaurant_id = r.id
-       WHERE mi.id = $1 AND r.owner_id = $2`,
-      [id, userId]
-    );
-
-    if (check.rows.length === 0) {
-      return res.status(403).json({ error: "Not authorized" });
-    }
-
-    const result = await pool.query(
-      "UPDATE menu_items SET name = $1, price = $2 WHERE id = $3 RETURNING *",
-      [name, Number(price), id]
-    );
-
-    res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

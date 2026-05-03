@@ -69,3 +69,28 @@ export const updateRestaurantSettings = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+export const updateMyRestaurant = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { name, location } = req.body;
+    const bannerUrl = req.file ? req.file.path : null;
+
+    const result = bannerUrl
+      ? await pool.query(
+          "UPDATE restaurants SET name = $1, location = $2, banner_url = $3 WHERE owner_id = $4 RETURNING *",
+          [name, location, bannerUrl, userId]
+        )
+      : await pool.query(
+          "UPDATE restaurants SET name = $1, location = $2 WHERE owner_id = $3 RETURNING *",
+          [name, location, userId]
+        );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Restaurant not found" });
+    }
+
+    res.json({ message: "Restaurant updated", restaurant: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};

@@ -27,11 +27,12 @@ export const createUser = async (req, res) => {
 // Create restaurant and assign to owner
 export const createRestaurantForOwner = async (req, res) => {
   const { name, location, owner_id } = req.body;
+  const bannerUrl = req.file ? req.file.path : null;
 
   try {
     const result = await pool.query(
-      "INSERT INTO restaurants (name, location, owner_id) VALUES ($1,$2,$3) RETURNING *",
-      [name, location, owner_id]
+      "INSERT INTO restaurants (name, location, owner_id, banner_url) VALUES ($1,$2,$3,$4) RETURNING *",
+      [name, location, owner_id, bannerUrl]
     );
 
     res.json({ message: "Restaurant created", restaurant: result.rows[0] });
@@ -150,6 +151,24 @@ export const getAllOrders = async (req, res) => {
        ORDER BY o.id DESC`
     );
     res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+
+// also add update restaurant banner
+export const updateRestaurantBanner = async (req, res) => {
+  const { id } = req.params;
+  const bannerUrl = req.file ? req.file.path : null;
+
+  try {
+    const result = await pool.query(
+      "UPDATE restaurants SET banner_url = $1 WHERE id = $2 RETURNING *",
+      [bannerUrl, id]
+    );
+
+    res.json({ message: "Banner updated", restaurant: result.rows[0] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

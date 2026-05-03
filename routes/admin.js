@@ -8,10 +8,12 @@ import {
   updateRestaurant,
   deleteRestaurant,
   getAllRestaurants,
-  getAllOrders
+  getAllOrders,
+  updateRestaurantBanner,
 } from "../controllers/adminController.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 import { checkRole } from "../middleware/roleMiddleware.js";
+import { uploadRestaurant } from "../config/cloudinaryRestaurant.js";
 
 const router = express.Router();
 
@@ -25,8 +27,9 @@ router.delete("/users/:id", deleteUser);
 
 // restaurants
 router.get("/restaurants", getAllRestaurants);
-router.post("/restaurants", createRestaurantForOwner);
+router.post("/restaurants", uploadRestaurant.single("banner"), createRestaurantForOwner);
 router.put("/restaurants/:id", updateRestaurant);
+router.put("/restaurants/:id/banner", uploadRestaurant.single("banner"), updateRestaurantBanner);
 router.delete("/restaurants/:id", deleteRestaurant);
 
 // orders
