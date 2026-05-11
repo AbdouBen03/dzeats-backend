@@ -37,6 +37,7 @@ export const updateRestaurantSettings = async (req, res) => {
       delivery_time_min,
       delivery_time_max,
       category,
+      delivery_zone
     } = req.body;
 
     const result = await pool.query(
@@ -48,8 +49,9 @@ export const updateRestaurantSettings = async (req, res) => {
         min_order = $5,
         delivery_time_min = $6,
         delivery_time_max = $7,
-        category = $8
-       WHERE owner_id = $9
+        category = $8,
+        delivery_zone = $9
+       WHERE owner_id = $10
        RETURNING *`,
       [
         is_open,
@@ -60,6 +62,7 @@ export const updateRestaurantSettings = async (req, res) => {
         Number(delivery_time_min),
         Number(delivery_time_max),
         category,
+        delivery_zone,
         userId,
       ]
     );

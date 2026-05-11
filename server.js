@@ -10,6 +10,7 @@ import ratingRoutes from "./routes/ratings.js";
 import addressRoutes from "./routes/addresses.js";
 import favoriteRoutes from "./routes/favorites.js";
 import promoRoutes from "./routes/promo.js";
+import complaintRoutes from "./routes/complaints.js";
 
 dotenv.config();
 
@@ -28,6 +29,7 @@ app.use("/api/ratings", ratingRoutes);
 app.use("/api/addresses", addressRoutes);
 app.use("/api/favorites", favoriteRoutes);
 app.use("/api/promo", promoRoutes);
+app.use("/api/complaints", complaintRoutes);
 
 app.get("/", (req, res) => {
   res.send("DZeats API is working 🚀");
