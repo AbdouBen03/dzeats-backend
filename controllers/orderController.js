@@ -14,6 +14,8 @@ export const createOrder = async (req, res) => {
       promo_code,
       discount,
       scheduled_at,
+      delivery_latitude,
+      delivery_longitude,
     } = req.body;
 
     // validate restaurant
@@ -56,8 +58,9 @@ export const createOrder = async (req, res) => {
     const orderResult = await pool.query(
       `INSERT INTO orders
         (user_id, restaurant_id, total, status, delivery_address,
-         delivery_fee, promo_code, discount, scheduled_at)
-       VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8)
+         delivery_fee, promo_code, discount, scheduled_at,
+         delivery_latitude, delivery_longitude)
+       VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
       [
         userId,
@@ -68,6 +71,8 @@ export const createOrder = async (req, res) => {
         promo_code || null,
         Number(discount || 0),
         scheduled_at || null,
+        delivery_latitude != null ? Number(delivery_latitude) : null,
+        delivery_longitude != null ? Number(delivery_longitude) : null,
       ]
     );
 
@@ -575,14 +580,16 @@ export const getRestaurantOrders = async (req, res) => {
   }
 };
 
-// DRIVER PICKUP — marks order as on_the_way after picking up from restaurant
+// DRIVER PICKUP — marks the order picked up (heading to the customer).
+// Status is already 'on_the_way' from driver-accept; we flip picked_up = true
+// so the driver map switches from restaurant navigation to customer navigation.
 export const driverPickup = async (req, res) => {
   try {
     const { id } = req.params;
     const driverId = req.user.id;
 
     const result = await pool.query(
-      `UPDATE orders SET status = 'on_the_way'
+      `UPDATE orders SET status = 'on_the_way', picked_up = true
        WHERE id = $1 AND driver_id = $2
        RETURNING *`,
       [id, driverId]
