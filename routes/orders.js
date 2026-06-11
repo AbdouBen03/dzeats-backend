@@ -10,12 +10,14 @@ import {
   getMyDriverOrders,
   getMyCustomerOrders,
   getOrderItems,
-getRestaurantOrders,
- confirmOrder, 
+  getRestaurantOrders,
+  confirmOrder,
   cancelOrder,
-customerCancelOrder,
-driverCancelOrder
-     
+  customerCancelOrder,
+  driverCancelOrder,
+  driverPickup,
+  updateDriverLocation,
+  getDriverLocation,
 } from "../controllers/orderController.js";
 
 import { verifyToken } from "../middleware/authMiddleware.js";
@@ -44,5 +46,9 @@ router.put("/:id/cancel", verifyToken, checkRole(["restaurant_owner"]), cancelOr
 router.put("/:id/customer-cancel", verifyToken, checkRole(["customer"]), customerCancelOrder);
 router.put("/:id/driver-cancel", verifyToken, checkRole(["driver"]), driverCancelOrder);
 
+// ✅ Maps / live tracking
+router.put("/:id/pickup", verifyToken, checkRole(["driver"]), driverPickup);
+router.post("/:id/location", verifyToken, checkRole(["driver"]), updateDriverLocation);
+router.get("/:id/driver-location", verifyToken, getDriverLocation);
 
 export default router;

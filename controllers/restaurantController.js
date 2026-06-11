@@ -37,7 +37,9 @@ export const updateRestaurantSettings = async (req, res) => {
       delivery_time_min,
       delivery_time_max,
       category,
-      delivery_zone
+      delivery_zone,
+      latitude,
+      longitude,
     } = req.body;
 
     const result = await pool.query(
@@ -50,8 +52,10 @@ export const updateRestaurantSettings = async (req, res) => {
         delivery_time_min = $6,
         delivery_time_max = $7,
         category = $8,
-        delivery_zone = $9
-       WHERE owner_id = $10
+        delivery_zone = $9,
+        latitude = COALESCE($10, latitude),
+        longitude = COALESCE($11, longitude)
+       WHERE owner_id = $12
        RETURNING *`,
       [
         is_open,
@@ -63,6 +67,8 @@ export const updateRestaurantSettings = async (req, res) => {
         Number(delivery_time_max),
         category,
         delivery_zone,
+        latitude != null ? Number(latitude) : null,
+        longitude != null ? Number(longitude) : null,
         userId,
       ]
     );
@@ -72,6 +78,7 @@ export const updateRestaurantSettings = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
 export const updateMyRestaurant = async (req, res) => {
   try {
     const userId = req.user.id;

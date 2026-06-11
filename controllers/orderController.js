@@ -54,8 +54,8 @@ export const createOrder = async (req, res) => {
     );
 
     const orderResult = await pool.query(
-      `INSERT INTO orders 
-        (user_id, restaurant_id, total, status, delivery_address, 
+      `INSERT INTO orders
+        (user_id, restaurant_id, total, status, delivery_address,
          delivery_fee, promo_code, discount, scheduled_at)
        VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8)
        RETURNING *`,
@@ -75,7 +75,7 @@ export const createOrder = async (req, res) => {
 
     for (const item of items) {
       await pool.query(
-        `INSERT INTO order_items 
+        `INSERT INTO order_items
           (order_id, menu_item_id, name, quantity, price)
          VALUES ($1, $2, $3, $4, $5)`,
         [order.id, item.id, item.name, item.quantity, Number(item.price)]
@@ -102,14 +102,14 @@ export const createOrder = async (req, res) => {
     if (owner.rows.length > 0) {
       await sendNotification(
         owner.rows[0].id,
-        "New Order 🔔",
-        `New order #${order.id} — ${Number(total)} DA`,
+        "New Order 🍕",
+        `New order #${order.id} → ${Number(total)} DA`,
         { type: "new_order", order_id: order.id.toString() }
       );
     }
 
     res.json({
-      message: "Order created 🚀",
+      message: "Order created 🎉",
       order_id: order.id,
       estimated_minutes: estimatedMinutes,
       points_earned: pointsEarned,
@@ -176,10 +176,17 @@ export const assignDriver = async (req, res) => {
 export const getAvailableOrdersForDrivers = async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT o.*, r.name AS restaurant_name, r.location AS restaurant_location
+      `SELECT o.*,
+              r.name AS restaurant_name,
+              r.location AS restaurant_location,
+              r.latitude AS restaurant_latitude,
+              r.longitude AS restaurant_longitude,
+              u.name AS customer_name,
+              u.phone AS customer_phone
        FROM orders o
        LEFT JOIN restaurants r ON o.restaurant_id = r.id
-       WHERE o.status = 'confirmed' AND o.driver_id IS NULL 
+       LEFT JOIN users u ON o.user_id = u.id
+       WHERE o.status = 'confirmed' AND o.driver_id IS NULL
        ORDER BY o.id DESC`
     );
     res.json(result.rows);
@@ -206,7 +213,7 @@ export const driverAcceptOrder = async (req, res) => {
     }
 
     const result = await pool.query(
-      `UPDATE orders 
+      `UPDATE orders
        SET driver_id = $1, status = 'on_the_way'
        WHERE id = $2 AND driver_id IS NULL
        RETURNING *`,
@@ -220,7 +227,7 @@ export const driverAcceptOrder = async (req, res) => {
     // notify customer
     await sendNotification(
       result.rows[0].user_id,
-      "Order Accepted 🚚",
+      "Order Accepted 🚗",
       "A driver is on the way to deliver your order!",
       { type: "order_on_the_way", order_id: id.toString() }
     );
@@ -325,7 +332,7 @@ export const cancelOrder = async (req, res) => {
     }
 
     const result = await pool.query(
-      `UPDATE orders SET 
+      `UPDATE orders SET
         status = 'cancelled',
         cancel_reason = $1,
         cancelled_by = 'restaurant'
@@ -361,7 +368,7 @@ export const customerCancelOrder = async (req, res) => {
 
     // can only cancel if still pending
     const result = await pool.query(
-      `UPDATE orders SET 
+      `UPDATE orders SET
         status = 'cancelled',
         cancel_reason = $1,
         cancelled_by = 'customer'
@@ -422,7 +429,7 @@ export const driverCancelOrder = async (req, res) => {
 
     // put order back to confirmed so another driver can take it
     const result = await pool.query(
-      `UPDATE orders SET 
+      `UPDATE orders SET
         status = 'confirmed',
         driver_id = NULL,
         cancel_reason = NULL,
@@ -443,7 +450,7 @@ export const driverCancelOrder = async (req, res) => {
     // notify all drivers that order is available again
     await sendNotificationToRole(
       "driver",
-      "Order Available Again 🚚",
+      "Order Available Again 🔔",
       `Order #${id} is available for pickup!`,
       { type: "order_confirmed", order_id: id.toString() }
     );
@@ -463,9 +470,16 @@ export const getMyDriverOrders = async (req, res) => {
     const driverId = req.user.id;
 
     const result = await pool.query(
-      `SELECT o.*, r.name AS restaurant_name, r.location AS restaurant_location
+      `SELECT o.*,
+              r.name AS restaurant_name,
+              r.location AS restaurant_location,
+              r.latitude AS restaurant_latitude,
+              r.longitude AS restaurant_longitude,
+              u.name AS customer_name,
+              u.phone AS customer_phone
        FROM orders o
        LEFT JOIN restaurants r ON o.restaurant_id = r.id
+       LEFT JOIN users u ON o.user_id = u.id
        WHERE o.driver_id = $1 AND o.status != 'delivered'
        ORDER BY o.id DESC`,
       [driverId]
@@ -483,11 +497,14 @@ export const getMyCustomerOrders = async (req, res) => {
     const userId = req.user.id;
 
     const result = await pool.query(
-      `SELECT 
+      `SELECT
         o.*,
         u.name AS driver_name,
         u.phone AS driver_phone,
-        r.name AS restaurant_name
+        r.name AS restaurant_name,
+        r.location AS restaurant_location,
+        r.latitude AS restaurant_latitude,
+        r.longitude AS restaurant_longitude
        FROM orders o
        LEFT JOIN users u ON o.driver_id = u.id
        LEFT JOIN restaurants r ON o.restaurant_id = r.id
@@ -508,7 +525,7 @@ export const getOrderItems = async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(
-      `SELECT oi.*, mi.name as menu_item_name 
+      `SELECT oi.*, mi.name as menu_item_name
        FROM order_items oi
        LEFT JOIN menu_items mi ON oi.menu_item_id = mi.id
        WHERE oi.order_id = $1`,
@@ -539,7 +556,7 @@ export const getRestaurantOrders = async (req, res) => {
     const restaurantId = restaurant.rows[0].id;
 
     const result = await pool.query(
-      `SELECT 
+      `SELECT
         o.*,
         u.name AS customer_name,
         u.phone AS customer_phone,
@@ -553,6 +570,78 @@ export const getRestaurantOrders = async (req, res) => {
     );
 
     res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// DRIVER PICKUP — marks order as on_the_way after picking up from restaurant
+export const driverPickup = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const driverId = req.user.id;
+
+    const result = await pool.query(
+      `UPDATE orders SET status = 'on_the_way'
+       WHERE id = $1 AND driver_id = $2
+       RETURNING *`,
+      [id, driverId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    res.json({ message: "Picked up", order: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// DRIVER UPDATES GPS LOCATION (called every ~10s while delivering)
+export const updateDriverLocation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const driverId = req.user.id;
+    const { latitude, longitude } = req.body;
+
+    await pool.query(
+      `UPDATE orders SET
+        driver_latitude = $1,
+        driver_longitude = $2,
+        driver_location_updated_at = NOW()
+       WHERE id = $3 AND driver_id = $4`,
+      [latitude, longitude, id, driverId]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// CUSTOMER GETS DRIVER LOCATION (polled while order is on the way)
+export const getDriverLocation = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `SELECT driver_latitude, driver_longitude
+       FROM orders WHERE id = $1`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    const { driver_latitude, driver_longitude } = result.rows[0];
+
+    if (!driver_latitude || !driver_longitude) {
+      return res.json({ available: false });
+    }
+
+    res.json({ latitude: driver_latitude, longitude: driver_longitude });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
