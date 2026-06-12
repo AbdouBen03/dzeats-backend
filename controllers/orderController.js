@@ -1,6 +1,30 @@
 import pool from "../config/db.js";
 import { sendNotification, sendNotificationToRole } from "../utils/notify.js";
 
+// ─── Driver fee helpers ──────────────────────────────────────────────────────
+// Straight-line distance between two points (km). Returns null if any missing.
+function haversineKm(lat1, lon1, lat2, lon2) {
+  if ([lat1, lon1, lat2, lon2].some((v) => v == null)) return null;
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// Driver earning: 100 DA base + 20 DA/km, rounded to nearest 10 DA.
+// Keep in sync with LocationService.driverEarning in the Flutter app.
+function computeDriverFee(km) {
+  const BASE = 100;
+  const PER_KM = 20;
+  if (km == null) return BASE;
+  return Math.round((BASE + PER_KM * km) / 10) * 10;
+}
+
 // CREATE ORDER
 export const createOrder = async (req, res) => {
   try {
@@ -217,12 +241,32 @@ export const driverAcceptOrder = async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
+    const order = check.rows[0];
+
+    // Lock in the driver's earning for this trip (base + per km).
+    const rest = await pool.query(
+      "SELECT latitude, longitude FROM restaurants WHERE id = $1",
+      [order.restaurant_id]
+    );
+    const r = rest.rows[0] || {};
+    const km = haversineKm(
+      r.latitude,
+      r.longitude,
+      order.delivery_latitude,
+      order.delivery_longitude
+    );
+    const driverFee = computeDriverFee(km);
+    // Who funds the fee: customer if they were charged delivery, otherwise the
+    // restaurant that offered free delivery (admin/app promos can set 'admin').
+    const feeFunder = Number(order.delivery_fee) > 0 ? "customer" : "restaurant";
+
     const result = await pool.query(
       `UPDATE orders
-       SET driver_id = $1, status = 'on_the_way'
+       SET driver_id = $1, status = 'on_the_way',
+           driver_fee = $3, fee_funder = $4
        WHERE id = $2 AND driver_id IS NULL
        RETURNING *`,
-      [driverId, id]
+      [driverId, id, driverFee, feeFunder]
     );
 
     if (result.rows.length === 0) {
@@ -250,7 +294,7 @@ export const markAsDelivered = async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(
-      "UPDATE orders SET status = 'delivered' WHERE id = $1 RETURNING *",
+      "UPDATE orders SET status = 'delivered', delivered_at = NOW() WHERE id = $1 RETURNING *",
       [id]
     );
 
@@ -649,6 +693,46 @@ export const getDriverLocation = async (req, res) => {
     }
 
     res.json({ latitude: driver_latitude, longitude: driver_longitude });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// DRIVER EARNINGS — total, this month, deliveries count and recent breakdown.
+export const getDriverEarnings = async (req, res) => {
+  try {
+    const driverId = req.user.id;
+
+    const totals = await pool.query(
+      `SELECT
+        COALESCE(SUM(driver_fee), 0) AS total,
+        COALESCE(SUM(driver_fee) FILTER (
+          WHERE delivered_at >= date_trunc('month', NOW())
+        ), 0) AS this_month,
+        COUNT(*) AS deliveries
+       FROM orders
+       WHERE driver_id = $1 AND status = 'delivered'`,
+      [driverId]
+    );
+
+    const recent = await pool.query(
+      `SELECT o.id, o.driver_fee, o.fee_funder, o.total, o.delivered_at,
+              r.name AS restaurant_name
+       FROM orders o
+       LEFT JOIN restaurants r ON o.restaurant_id = r.id
+       WHERE o.driver_id = $1 AND o.status = 'delivered'
+       ORDER BY o.delivered_at DESC NULLS LAST
+       LIMIT 15`,
+      [driverId]
+    );
+
+    const t = totals.rows[0];
+    res.json({
+      total: Number(t.total),
+      this_month: Number(t.this_month),
+      deliveries: Number(t.deliveries),
+      recent: recent.rows,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
