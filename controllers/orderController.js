@@ -25,6 +25,34 @@ function computeDriverFee(km) {
   return Math.round((BASE + PER_KM * km) / 10) * 10;
 }
 
+// ─── Monthly points (tiers/levels) ───────────────────────────────────────────
+function currentMonthKey() {
+  return new Date().toISOString().slice(0, 7); // "YYYY-MM"
+}
+
+// Add (or subtract) monthly points; auto-resets when the month rolls over.
+async function awardMonthPoints(userId, amount) {
+  if (!userId || !amount) return;
+  const month = currentMonthKey();
+  await pool.query(
+    `UPDATE users SET
+       month_points = GREATEST(0, CASE WHEN points_month = $2
+                                       THEN month_points + $3 ELSE $3 END),
+       points_month = $2
+     WHERE id = $1`,
+    [userId, month, amount]
+  );
+}
+
+// Driver level bonus % based on this month's points.
+function driverBonusPercent(monthPoints) {
+  const mp = Number(monthPoints) || 0;
+  if (mp >= 1000) return 15;
+  if (mp >= 500) return 10;
+  if (mp >= 200) return 5;
+  return 0;
+}
+
 // CREATE ORDER
 export const createOrder = async (req, res) => {
   try {
@@ -40,6 +68,7 @@ export const createOrder = async (req, res) => {
       scheduled_at,
       delivery_latitude,
       delivery_longitude,
+      redeem_points,
     } = req.body;
 
     // validate restaurant
@@ -79,6 +108,18 @@ export const createOrder = async (req, res) => {
         (rest.delivery_time_min || 20)
     );
 
+    // Validate loyalty-points redemption (customer spends points for a reward).
+    const redeem = Number(redeem_points || 0);
+    if (redeem > 0) {
+      const bal = await pool.query(
+        "SELECT loyalty_points FROM users WHERE id = $1",
+        [userId]
+      );
+      if (Number(bal.rows[0]?.loyalty_points || 0) < redeem) {
+        return res.status(400).json({ error: "Not enough points" });
+      }
+    }
+
     const orderResult = await pool.query(
       `INSERT INTO orders
         (user_id, restaurant_id, total, status, delivery_address,
@@ -111,12 +152,13 @@ export const createOrder = async (req, res) => {
       );
     }
 
-    // add loyalty points (1 point per 10 DA spent)
+    // Loyalty points: earn 1 per 10 DA, minus any points redeemed at checkout.
     const pointsEarned = Math.floor(Number(total) / 10);
-    if (pointsEarned > 0) {
+    const netPoints = pointsEarned - redeem;
+    if (netPoints !== 0) {
       await pool.query(
-        "UPDATE users SET loyalty_points = loyalty_points + $1 WHERE id = $2",
-        [pointsEarned, userId]
+        "UPDATE users SET loyalty_points = GREATEST(0, loyalty_points + $1) WHERE id = $2",
+        [netPoints, userId]
       );
     }
 
@@ -255,7 +297,18 @@ export const driverAcceptOrder = async (req, res) => {
       order.delivery_latitude,
       order.delivery_longitude
     );
-    const driverFee = computeDriverFee(km);
+    let driverFee = computeDriverFee(km);
+    // Apply the driver's level bonus (this month's points → +5/10/15%).
+    const dRow = await pool.query(
+      "SELECT month_points, points_month FROM users WHERE id = $1",
+      [driverId]
+    );
+    const d = dRow.rows[0] || {};
+    const driverMp = d.points_month === currentMonthKey() ? d.month_points : 0;
+    const bonus = driverBonusPercent(driverMp);
+    if (bonus > 0) {
+      driverFee = Math.round((driverFee * (1 + bonus / 100)) / 10) * 10;
+    }
     // Who funds the fee: customer if they were charged delivery, otherwise the
     // restaurant that offered free delivery (admin/app promos can set 'admin').
     const feeFunder = Number(order.delivery_fee) > 0 ? "customer" : "restaurant";
@@ -300,6 +353,22 @@ export const markAsDelivered = async (req, res) => {
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "Order not found" });
+    }
+
+    const o = result.rows[0];
+    // Award monthly tier/level points: customer 1/10 DA, driver +10, restaurant +5.
+    try {
+      await awardMonthPoints(o.user_id, Math.floor(Number(o.total) / 10));
+      if (o.driver_id) await awardMonthPoints(o.driver_id, 10);
+      const owner = await pool.query(
+        "SELECT owner_id FROM restaurants WHERE id = $1",
+        [o.restaurant_id]
+      );
+      if (owner.rows[0]?.owner_id) {
+        await awardMonthPoints(owner.rows[0].owner_id, 5);
+      }
+    } catch (e) {
+      console.error("points award error:", e.message);
     }
 
     // notify customer
@@ -732,6 +801,31 @@ export const getDriverEarnings = async (req, res) => {
       this_month: Number(t.this_month),
       deliveries: Number(t.deliveries),
       recent: recent.rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Current user's points: monthly points (for tier/level) + spendable loyalty.
+export const getMyPoints = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const row = await pool.query(
+      "SELECT role, loyalty_points, month_points, points_month FROM users WHERE id = $1",
+      [userId]
+    );
+    if (row.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const u = row.rows[0];
+    // If the stored month is stale, this month's standing is effectively 0.
+    const monthPoints =
+      u.points_month === currentMonthKey() ? Number(u.month_points || 0) : 0;
+    res.json({
+      role: u.role,
+      loyalty_points: Number(u.loyalty_points || 0),
+      month_points: monthPoints,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

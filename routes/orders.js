@@ -19,6 +19,7 @@ import {
   updateDriverLocation,
   getDriverLocation,
   getDriverEarnings,
+  getMyPoints,
 } from "../controllers/orderController.js";
 
 import { verifyToken } from "../middleware/authMiddleware.js";
@@ -30,6 +31,7 @@ const router = express.Router();
 router.get("/driver/available", verifyToken, checkRole(["driver"]), getAvailableOrdersForDrivers);
 router.get("/driver/my-orders", verifyToken, checkRole(["driver"]), getMyDriverOrders);
 router.get("/driver/earnings", verifyToken, checkRole(["driver"]), getDriverEarnings);
+router.get("/my-points", verifyToken, getMyPoints);
 router.get("/customer/my-orders", verifyToken, checkRole(["customer"]), getMyCustomerOrders);
 router.get("/restaurant/my-orders", verifyToken, checkRole(["restaurant_owner"]), getRestaurantOrders);
 
