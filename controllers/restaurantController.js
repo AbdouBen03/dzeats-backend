@@ -2,8 +2,17 @@ import pool from "../config/db.js";
 
 export const getRestaurants = async (req, res) => {
   try {
+    // Hide blocked / unapproved restaurants from customers; show active
+    // sponsored ones first, then open restaurants.
     const result = await pool.query(
-      "SELECT * FROM restaurants ORDER BY is_open DESC, id DESC"
+      `SELECT * FROM restaurants
+       WHERE COALESCE(blocked, false) = false
+         AND COALESCE(approved, true) = true
+       ORDER BY
+         (COALESCE(sponsored, false) = true
+            AND (sponsored_until IS NULL OR sponsored_until > NOW())) DESC,
+         is_open DESC,
+         id DESC`
     );
     res.json(result.rows);
   } catch (err) {

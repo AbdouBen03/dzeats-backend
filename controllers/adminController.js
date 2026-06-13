@@ -97,6 +97,42 @@ export const adjustUserPoints = async (req, res) => {
   }
 };
 
+// Drivers with their performance stats (admin view)
+export const getDriversWithStats = async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT u.id, u.name, u.phone, u.role,
+             COALESCE(u.blocked, false) AS blocked,
+             COALESCE(u.loyalty_points, 0) AS loyalty_points,
+             COUNT(o.id) FILTER (WHERE o.status = 'delivered') AS deliveries,
+             COUNT(o.id) FILTER (WHERE o.status = 'cancelled') AS cancelled,
+             COALESCE(SUM(o.driver_fee) FILTER (WHERE o.status = 'delivered'), 0)
+               AS earnings,
+             BOOL_OR(o.status = 'on_the_way') AS active,
+             (SELECT ROUND(AVG(rt.rating), 1)
+              FROM ratings rt
+              JOIN orders o2 ON rt.order_id = o2.id
+              WHERE o2.driver_id = u.id) AS rating
+      FROM users u
+      LEFT JOIN orders o ON o.driver_id = u.id
+      WHERE u.role = 'driver'
+      GROUP BY u.id
+      ORDER BY deliveries DESC, u.id DESC
+    `);
+    res.json(result.rows.map((d) => ({
+      ...d,
+      deliveries: Number(d.deliveries),
+      cancelled: Number(d.cancelled),
+      earnings: Number(d.earnings),
+      loyalty_points: Number(d.loyalty_points),
+      rating: d.rating != null ? Number(d.rating) : null,
+      active: d.active === true,
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 // A user's order history (admin view)
 export const getUserOrders = async (req, res) => {
   try {
@@ -163,6 +199,64 @@ export const updateRestaurant = async (req, res) => {
     }
 
     res.json({ message: "Restaurant updated", restaurant: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Toggle restaurant admin flags (approved / verified / blocked / is_open).
+// Send any subset, e.g. { verified: true } or { blocked: true }.
+export const updateRestaurantFlags = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const allowed = ["approved", "verified", "blocked", "is_open"];
+    const sets = [];
+    const vals = [];
+    let i = 1;
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) {
+        sets.push(`${key} = $${i++}`);
+        vals.push(req.body[key] === true);
+      }
+    }
+    if (sets.length === 0) {
+      return res.status(400).json({ error: "No flags provided" });
+    }
+    vals.push(id);
+    const result = await pool.query(
+      `UPDATE restaurants SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
+      vals
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Restaurant not found" });
+    }
+    res.json({ message: "Restaurant updated", restaurant: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Sponsor a restaurant for N days (0 days = stop sponsoring).
+export const sponsorRestaurant = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const days = Number(req.body.days || 0);
+    const result = days > 0
+      ? await pool.query(
+          `UPDATE restaurants
+           SET sponsored = true, sponsored_until = NOW() + ($1 || ' days')::interval
+           WHERE id = $2 RETURNING *`,
+          [days, id]
+        )
+      : await pool.query(
+          `UPDATE restaurants SET sponsored = false, sponsored_until = NULL
+           WHERE id = $1 RETURNING *`,
+          [id]
+        );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Restaurant not found" });
+    }
+    res.json({ message: "Sponsorship updated", restaurant: result.rows[0] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -322,6 +416,72 @@ export const getAdminStats = async (req, res) => {
         label: r.label, orders: Number(r.orders), revenue: Number(r.revenue),
       })),
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ─── Admin order management ──────────────────────────────────────────────────
+const ORDER_STATUSES = [
+  "pending", "confirmed", "on_the_way", "delivered", "cancelled",
+];
+
+// Change an order's status to any valid value.
+export const adminSetOrderStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!ORDER_STATUSES.includes(status)) {
+      return res.status(400).json({ error: "Invalid status" });
+    }
+    // stamp delivered_at when moving to delivered
+    const result = await pool.query(
+      `UPDATE orders
+       SET status = $1,
+           delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END
+       WHERE id = $2 RETURNING *`,
+      [status, id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+    res.json({ message: "Status updated", order: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Assign / reassign a driver to an order.
+export const adminAssignDriver = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const driverId = req.body.driver_id ? Number(req.body.driver_id) : null;
+    const result = await pool.query(
+      "UPDATE orders SET driver_id = $1 WHERE id = $2 RETURNING *",
+      [driverId, id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+    res.json({ message: "Driver assigned", order: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Refund an order: mark refunded and cancel it.
+export const adminRefundOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE orders SET refunded = true, status = 'cancelled'
+       WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+    res.json({ message: "Order refunded", order: result.rows[0] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
