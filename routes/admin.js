@@ -10,6 +10,7 @@ import {
   getAllRestaurants,
   getAllOrders,
   updateRestaurantBanner,
+  getAdminStats,
 } from "../controllers/adminController.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 import { checkRole } from "../middleware/roleMiddleware.js";
@@ -18,6 +19,9 @@ import { uploadRestaurant } from "../config/cloudinaryRestaurant.js";
 const router = express.Router();
 
 router.use(verifyToken, checkRole(["admin"]));
+
+// dashboard
+router.get("/stats", getAdminStats);
 
 // users
 router.get("/users", getAllUsers);

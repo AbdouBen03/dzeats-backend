@@ -158,6 +158,114 @@ export const getAllOrders = async (req, res) => {
 };
 
 
+// ─── Admin dashboard stats ───────────────────────────────────────────────────
+export const getAdminStats = async (req, res) => {
+  try {
+    const totals = await pool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM users WHERE role = 'customer') AS total_customers,
+        (SELECT COUNT(*) FROM users WHERE role = 'driver') AS total_drivers,
+        (SELECT COUNT(*) FROM restaurants) AS total_restaurants,
+        (SELECT COUNT(*) FROM orders) AS total_orders,
+        (SELECT COUNT(*) FROM orders WHERE created_at::date = CURRENT_DATE)
+          AS today_orders,
+        (SELECT COALESCE(SUM(total), 0) FROM orders
+          WHERE status = 'delivered' AND created_at::date = CURRENT_DATE)
+          AS today_revenue,
+        (SELECT COALESCE(SUM(total), 0) FROM orders WHERE status = 'delivered')
+          AS total_revenue,
+        (SELECT COUNT(*) FROM orders WHERE status = 'pending') AS pending_orders,
+        (SELECT COUNT(*) FROM orders WHERE status = 'cancelled')
+          AS cancelled_orders,
+        (SELECT COUNT(DISTINCT driver_id) FROM orders
+          WHERE status = 'on_the_way' AND driver_id IS NOT NULL)
+          AS active_drivers,
+        (SELECT COUNT(*) FROM users WHERE created_at >= date_trunc('week', NOW()))
+          AS new_users_week,
+        (SELECT COUNT(*) FROM complaints WHERE status = 'pending')
+          AS open_complaints
+    `);
+
+    const topRestaurants = await pool.query(`
+      SELECT r.id, r.name,
+             COUNT(o.id) AS orders,
+             COALESCE(SUM(o.total) FILTER (WHERE o.status = 'delivered'), 0) AS revenue
+      FROM restaurants r
+      LEFT JOIN orders o ON o.restaurant_id = r.id
+      GROUP BY r.id, r.name
+      ORDER BY orders DESC, revenue DESC
+      LIMIT 5
+    `);
+
+    const topCustomers = await pool.query(`
+      SELECT u.id, u.name,
+             COUNT(o.id) AS orders,
+             COALESCE(SUM(o.total), 0) AS spent
+      FROM users u
+      JOIN orders o ON o.user_id = u.id
+      WHERE u.role = 'customer'
+      GROUP BY u.id, u.name
+      ORDER BY orders DESC
+      LIMIT 5
+    `);
+
+    const topDrivers = await pool.query(`
+      SELECT u.id, u.name,
+             COUNT(o.id) FILTER (WHERE o.status = 'delivered') AS deliveries
+      FROM users u
+      JOIN orders o ON o.driver_id = u.id
+      WHERE u.role = 'driver'
+      GROUP BY u.id, u.name
+      ORDER BY deliveries DESC
+      LIMIT 5
+    `);
+
+    const daily = await pool.query(`
+      SELECT to_char(d.day, 'Dy') AS label,
+             COALESCE(COUNT(o.id), 0)::int AS orders,
+             COALESCE(SUM(o.total) FILTER (WHERE o.status = 'delivered'), 0) AS revenue
+      FROM generate_series(
+             (NOW() - INTERVAL '6 days')::date, NOW()::date, INTERVAL '1 day'
+           ) AS d(day)
+      LEFT JOIN orders o ON o.created_at::date = d.day
+      GROUP BY d.day
+      ORDER BY d.day ASC
+    `);
+
+    const t = totals.rows[0];
+    res.json({
+      total_customers: Number(t.total_customers),
+      total_drivers: Number(t.total_drivers),
+      total_restaurants: Number(t.total_restaurants),
+      total_orders: Number(t.total_orders),
+      today_orders: Number(t.today_orders),
+      today_revenue: Number(t.today_revenue),
+      total_revenue: Number(t.total_revenue),
+      pending_orders: Number(t.pending_orders),
+      cancelled_orders: Number(t.cancelled_orders),
+      active_drivers: Number(t.active_drivers),
+      new_users_week: Number(t.new_users_week),
+      open_complaints: Number(t.open_complaints),
+      top_restaurants: topRestaurants.rows.map((r) => ({
+        id: r.id, name: r.name,
+        orders: Number(r.orders), revenue: Number(r.revenue),
+      })),
+      top_customers: topCustomers.rows.map((r) => ({
+        id: r.id, name: r.name,
+        orders: Number(r.orders), spent: Number(r.spent),
+      })),
+      top_drivers: topDrivers.rows.map((r) => ({
+        id: r.id, name: r.name, deliveries: Number(r.deliveries),
+      })),
+      daily: daily.rows.map((r) => ({
+        label: r.label, orders: Number(r.orders), revenue: Number(r.revenue),
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 // also add update restaurant banner
 export const updateRestaurantBanner = async (req, res) => {
   const { id } = req.params;
