@@ -3,7 +3,8 @@ import {
   getRestaurants,
   createRestaurant,
   updateRestaurantSettings,
-  updateMyRestaurant
+  updateMyRestaurant,
+  getRestaurantAnalytics
 } from "../controllers/restaurantController.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 import { checkRole } from "../middleware/roleMiddleware.js";
@@ -13,6 +14,7 @@ const router = express.Router();
 
 router.get("/", getRestaurants);
 router.post("/", createRestaurant);
+router.get("/analytics", verifyToken, checkRole(["restaurant_owner"]), getRestaurantAnalytics);
 router.put("/settings", verifyToken, checkRole(["restaurant_owner"]), updateRestaurantSettings);
 router.put("/my-restaurant", verifyToken, checkRole(["restaurant_owner"]), uploadRestaurant.single("banner"), updateMyRestaurant);
 
