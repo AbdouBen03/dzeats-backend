@@ -11,6 +11,9 @@ import {
   getAllOrders,
   updateRestaurantBanner,
   getAdminStats,
+  setUserBlocked,
+  adjustUserPoints,
+  getUserOrders,
 } from "../controllers/adminController.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 import { checkRole } from "../middleware/roleMiddleware.js";
@@ -27,6 +30,9 @@ router.get("/stats", getAdminStats);
 router.get("/users", getAllUsers);
 router.post("/users", createUser);
 router.put("/users/:id", updateUser);
+router.put("/users/:id/blocked", setUserBlocked);
+router.put("/users/:id/points", adjustUserPoints);
+router.get("/users/:id/orders", getUserOrders);
 router.delete("/users/:id", deleteUser);
 
 // restaurants

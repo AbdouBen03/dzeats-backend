@@ -47,7 +47,68 @@ export const createRestaurantForOwner = async (req, res) => {
 export const getAllUsers = async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, name, phone, role FROM users ORDER BY id DESC"
+      `SELECT id, name, phone, role,
+              COALESCE(loyalty_points, 0) AS loyalty_points,
+              COALESCE(blocked, false) AS blocked,
+              created_at
+       FROM users ORDER BY id DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Block / unblock a user
+export const setUserBlocked = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { blocked } = req.body;
+    const result = await pool.query(
+      "UPDATE users SET blocked = $1 WHERE id = $2 RETURNING id, name, blocked",
+      [blocked === true, id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    res.json({ message: "User updated", user: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Add or remove loyalty points (amount can be negative). Never goes below 0.
+export const adjustUserPoints = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const amount = Number(req.body.amount || 0);
+    const result = await pool.query(
+      `UPDATE users
+       SET loyalty_points = GREATEST(0, COALESCE(loyalty_points, 0) + $1)
+       WHERE id = $2 RETURNING id, name, loyalty_points`,
+      [amount, id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    res.json({ message: "Points updated", user: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// A user's order history (admin view)
+export const getUserOrders = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT o.id, o.status, o.total, o.created_at,
+              r.name AS restaurant_name
+       FROM orders o
+       LEFT JOIN restaurants r ON o.restaurant_id = r.id
+       WHERE o.user_id = $1
+       ORDER BY o.id DESC`,
+      [id]
     );
     res.json(result.rows);
   } catch (err) {

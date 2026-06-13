@@ -32,11 +32,26 @@ export const getMyComplaints = async (req, res) => {
 
 export const getAllComplaints = async (req, res) => {
   try {
+    // Include WHO filed it (name + role) and the related order's context
+    // (restaurant + driver) so the admin can read and understand each report.
     const result = await pool.query(
-      `SELECT c.*, u.name AS customer_name, u.phone AS customer_phone
+      `SELECT c.*,
+              u.name  AS reporter_name,
+              u.phone AS reporter_phone,
+              u.role  AS reporter_role,
+              o.status AS order_status,
+              o.total  AS order_total,
+              r.name AS restaurant_name,
+              d.name AS driver_name,
+              -- keep legacy field names for backward compatibility
+              u.name  AS customer_name,
+              u.phone AS customer_phone
        FROM complaints c
        LEFT JOIN users u ON c.user_id = u.id
-       ORDER BY c.id DESC`
+       LEFT JOIN orders o ON c.order_id = o.id
+       LEFT JOIN restaurants r ON o.restaurant_id = r.id
+       LEFT JOIN users d ON o.driver_id = d.id
+       ORDER BY (c.status = 'pending') DESC, c.id DESC`
     );
     res.json(result.rows);
   } catch (err) {

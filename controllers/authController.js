@@ -38,6 +38,12 @@ export const login = async (req, res) => {
       return res.status(400).json("Wrong password");
     }
 
+    if (user.rows[0].blocked === true) {
+      return res
+        .status(403)
+        .json("Your account has been blocked. Contact support.");
+    }
+
    const token = jwt.sign(
   { id: user.rows[0].id, role: user.rows[0].role },
   process.env.JWT_SECRET,
