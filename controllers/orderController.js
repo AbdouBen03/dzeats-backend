@@ -146,9 +146,10 @@ export const createOrder = async (req, res) => {
     for (const item of items) {
       await pool.query(
         `INSERT INTO order_items
-          (order_id, menu_item_id, name, quantity, price)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [order.id, item.id, item.name, item.quantity, Number(item.price)]
+          (order_id, menu_item_id, name, quantity, price, note)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [order.id, item.id, item.name, item.quantity, Number(item.price),
+         item.note || null]
       );
     }
 
