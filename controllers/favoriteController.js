@@ -16,6 +16,20 @@ export const getFavorites = async (req, res) => {
   }
 };
 
+// Just the restaurant ids this user favourited (for showing filled hearts).
+export const getFavoriteIds = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const result = await pool.query(
+      "SELECT restaurant_id FROM favorite_restaurants WHERE user_id = $1",
+      [userId]
+    );
+    res.json(result.rows.map((r) => r.restaurant_id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 export const toggleFavorite = async (req, res) => {
   try {
     const userId = req.user.id;

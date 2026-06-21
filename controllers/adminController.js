@@ -343,11 +343,12 @@ export const getAdminStats = async (req, res) => {
 
     const topRestaurants = await pool.query(`
       SELECT r.id, r.name,
+             COALESCE(r.avg_rating, 0) AS rating,
              COUNT(o.id) AS orders,
              COALESCE(SUM(o.total) FILTER (WHERE o.status = 'delivered'), 0) AS revenue
       FROM restaurants r
       LEFT JOIN orders o ON o.restaurant_id = r.id
-      GROUP BY r.id, r.name
+      GROUP BY r.id, r.name, r.avg_rating
       ORDER BY orders DESC, revenue DESC
       LIMIT 5
     `);
@@ -404,6 +405,7 @@ export const getAdminStats = async (req, res) => {
       top_restaurants: topRestaurants.rows.map((r) => ({
         id: r.id, name: r.name,
         orders: Number(r.orders), revenue: Number(r.revenue),
+        rating: Number(r.rating),
       })),
       top_customers: topCustomers.rows.map((r) => ({
         id: r.id, name: r.name,

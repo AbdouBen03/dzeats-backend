@@ -166,6 +166,13 @@ export const getRestaurantAnalytics = async (req, res) => {
       [restaurantId]
     );
 
+    // ratings: average + count for this restaurant
+    const ratingRes = await pool.query(
+      `SELECT ROUND(AVG(rating), 1) AS avg, COUNT(*) AS cnt
+       FROM ratings WHERE restaurant_id = $1`,
+      [restaurantId]
+    );
+
     const s = summary.rows[0];
     const c = customers.rows[0];
     res.json({
@@ -178,6 +185,10 @@ export const getRestaurantAnalytics = async (req, res) => {
         : null,
       total_customers: Number(c.total_customers),
       returning_customers: Number(c.returning_customers),
+      rating: ratingRes.rows[0].avg != null
+        ? Number(ratingRes.rows[0].avg)
+        : 0,
+      ratings_count: Number(ratingRes.rows[0].cnt),
       daily: series.rows.map((r) => ({
         label: r.label,
         date: r.date,
